@@ -1,0 +1,312 @@
+*&---------------------------------------------------------------------*
+*& Report ZOOP_REPORT01
+*&---------------------------------------------------------------------*
+*&DEVELOP : Tshanduko Mulaudzi
+*&DATE    : 14.07.22
+*&REQUEST : OOP ALV Report selectiong from two tables.
+*&---------------------------------------------------------------------*
+REPORT ztsha_oop MESSAGE-ID zmm_report_msg.
+
+DATA : it_sflight TYPE STANDARD TABLE OF sflight,
+       wa_sflight LIKE LINE OF it_sflight,
+       it_scarr   TYPE STANDARD TABLE OF scarr,
+       wa_scarr   LIKE LINE OF it_scarr,
+       it_icon    TYPE STANDARD TABLE OF icon,
+       wa_icon    LIKE LINE OF it_icon.
+DATA:lr_salv    TYPE REF TO cl_salv_table,
+     lr_columns TYPE REF TO cl_salv_columns_table,
+     lr_column  TYPE REF TO cl_salv_column.
+
+*Selection Parameter Declaration
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-001.
+SELECT-OPTIONS : ls_carr FOR  wa_sflight-carrid,
+                 ls_conn FOR wa_sflight-connid,
+                 ls_fldat FOR wa_sflight-fldate.
+SELECTION-SCREEN END OF BLOCK b1.
+
+**&   RADIOBUTTON SELECTION BEGIN
+SELECTION-SCREEN BEGIN OF BLOCK b2 WITH FRAME TITLE TEXT-002.
+*&    RADIOBUTTON
+PARAMETERS: lv_rad1 RADIOBUTTON GROUP r2 USER-COMMAND action DEFAULT 'X',
+            lv_rad2 RADIOBUTTON GROUP r2.
+
+*&    CHECKBOX
+PARAMETERS : lv_chk1 AS CHECKBOX MODIF ID a,
+             lv_chk2 AS CHECKBOX MODIF ID a DEFAULT 'X'.
+SELECTION-SCREEN END OF BLOCK b2.
+
+ AT SELECTION-SCREEN OUTPUT.
+LOOP AT SCREEN.
+      if lv_rad1 is NOT INITIAL.
+        IF screen-group1     = 'A'.
+          screen-active = '0'.
+          MODIFY SCREEN.
+        ENDIF.
+
+    ELSEIF lv_rad2 is not INITIAL.
+        IF screen-group1     = 'A'.
+          screen-active = '1'.
+          MODIFY SCREEN.
+        ENDIF.
+   ENDIF.
+ENDLOOP.
+
+**&   RADIOBUTTON SELECTION BEGIN
+
+CLASS lcl_report DEFINITION.
+*
+  PUBLIC SECTION.
+
+*   Final output table
+    TYPES : BEGIN OF ty_output,
+              lv_carrid   TYPE s_carr_id,
+              lv_connid   TYPE s_conn_id,
+              lv_fldate   TYPE s_date,
+              lv_price    TYPE s_price,
+              lv_carrname TYPE s_carrname,
+              lv_currcode TYPE s_currcode,
+              lv_url      TYPE s_carrurl,
+              lv_icon     TYPE iconname,
+            END OF ty_output.
+
+    DATA : it_output TYPE STANDARD TABLE OF ty_output,
+           wa_output LIKE LINE OF it_output.
+
+
+*
+    CONSTANTS lv_name(30) VALUE 'ICON_LED_GREEN'.
+
+
+    METHODS:
+*     data selection
+      get_data,
+*
+*     Generating output
+      generate_output,
+
+      "Winning code
+      change_columns.
+
+* TOP OF PAGE BEGIN
+    METHODS: set_pf_status
+      CHANGING
+        co_alv TYPE REF TO cl_salv_table, " Default Pf Status
+      set_top_of_page
+        CHANGING
+          co_alv TYPE REF TO cl_salv_table, " Set Top of page
+      set_end_of_page
+        CHANGING
+          co_alv TYPE REF TO cl_salv_table. " Set End of page
+
+*TOP OF PAGE END
+ENDCLASS.                    "lcl_report DEFINITION
+*
+*
+
+*
+*----------------------------------------------------------------------*
+*       CLASS lcl_report IMPLEMENTATION
+*----------------------------------------------------------------------*
+CLASS lcl_report IMPLEMENTATION.
+
+*
+  METHOD get_data.
+*   data selection
+    CLEAR: wa_sflight, wa_scarr.
+    REFRESH: it_sflight, it_scarr.
+
+    SELECT carrid,
+           connid,
+           fldate,
+           price
+       FROM sflight
+      INTO (@wa_sflight-carrid, @wa_sflight-connid, @wa_sflight-fldate, @wa_sflight-price)
+        WHERE carrid IN @ls_carr
+    AND connid IN @ls_conn
+    AND fldate IN @ls_fldat.
+
+      IF sy-subrc = 0.
+        SELECT carrid,
+               carrname,
+               currcode,
+               url
+          FROM scarr
+          INTO (@wa_scarr-carrid, @wa_scarr-carrname, @wa_scarr-currcode, @wa_scarr-url)
+           WHERE carrid EQ @wa_sflight-carrid.
+
+          IF sy-subrc = 0.
+            SELECT SINGLE id FROM icon INTO @wa_icon-id
+              WHERE name = @lv_name.
+
+            MOVE wa_sflight-carrid TO wa_output-lv_carrid.
+            MOVE wa_sflight-connid TO wa_output-lv_connid.
+            MOVE wa_sflight-fldate TO wa_output-lv_fldate.
+            MOVE wa_sflight-price TO wa_output-lv_price.
+            MOVE wa_scarr-carrname TO wa_output-lv_carrname.
+            MOVE wa_scarr-currcode TO wa_output-lv_currcode.
+            MOVE wa_scarr-url TO wa_output-lv_url.
+            MOVE wa_icon-id TO wa_output-lv_icon.
+
+            APPEND wa_output TO it_output.
+            CLEAR: wa_output, wa_sflight, wa_scarr, wa_icon.
+          ENDIF.
+        ENDSELECT.
+      ELSE.
+        MESSAGE e001.
+      ENDIF.
+    ENDSELECT.
+  ENDMETHOD.                    "get_data
+*
+*.......................................................................
+  METHOD generate_output.
+* exception class
+* TOP OF PAGE
+    DATA: lo_alv_functions TYPE REF TO cl_salv_functions_list.
+* TOP OF PAGE END
+    DATA: lx_msg TYPE REF TO cx_salv_msg.
+    TRY.
+        cl_salv_table=>factory(
+          IMPORTING
+            r_salv_table = lr_salv
+          CHANGING
+            t_table      = it_output ).
+      CATCH cx_salv_msg INTO lx_msg.
+    ENDTRY.
+
+
+*TOP OF PAGE BEGIN
+    CALL METHOD set_pf_status
+      CHANGING
+        co_alv = lr_salv. "set_end_of_page
+* Calling the top of page method
+    CALL METHOD set_top_of_page
+      CHANGING
+        co_alv = lr_salv.
+
+*Set functions
+    lo_alv_functions = lr_salv->get_functions( ).
+    lo_alv_functions->set_default( 'X' ).
+    lo_alv_functions->set_all( 'X' ).
+    lo_alv_functions->set_layout_save( 'X' ).
+    lo_alv_functions->set_layout_load( 'X' ).
+    lo_alv_functions->set_layout_maintain( 'X' ).
+    lo_alv_functions->set_layout_save( 'X' ).
+
+*Calling the End of page method
+    CALL METHOD set_end_of_page
+      CHANGING
+        co_alv = lr_salv.
+************************************************************************
+* Displaying the ALV
+* Here we will call the DISPLAY method to get the output on the screen
+
+**TOP OF PAGE END
+  ENDMETHOD.                    "generate_output
+
+*TOP OF PAGE BEGIN
+*Setting Default PF-Status
+
+  METHOD set_pf_status.
+    DATA: lo_functions TYPE REF TO cl_salv_functions_list.
+* Default functions
+    lo_functions = co_alv->get_functions( ).
+    lo_functions->set_default( abap_true ).
+  ENDMETHOD. "set_pf_status
+*TOP OF PAGE END
+
+* Setting Top_of_page
+  METHOD set_top_of_page.
+    DATA: lo_header  TYPE REF TO cl_salv_form_layout_grid,
+          lo_h_label TYPE REF TO cl_salv_form_label,
+          lo_h_flow  TYPE REF TO cl_salv_form_layout_flow.
+* Header object
+    CREATE OBJECT lo_header.
+*----------------------------------------------------------------------*
+* To create a Label or Flow we have to specify the target
+* row and column number where we need to set up the output
+* text.
+*----------------------------------------------------------------------*
+* Information in Bold
+    lo_h_label = lo_header->create_label( row = 1 column = 1 text = 'Header of the ALV Output in Bold' ).
+    lo_header->create_header_information( row = 1
+    column = 1
+    text = 'Header of the ALV Output in Bold' ).
+    lo_h_label->set_text('Header of the ALV Output in Bold').
+* Information in tabular format
+    lo_h_flow = lo_header->create_flow( row = 2 column = 1 ).
+    lo_h_flow->create_text( text = 'This is text of flow in Header' ).
+    lo_h_flow = lo_header->create_flow( row = 3 column = 1 ).
+    lo_h_flow->create_text( text = 'Date of List Generation and username' ).
+    lo_h_flow = lo_header->create_flow( row = 3 column = 2 ).
+    lo_h_flow->create_text( text = sy-datum ).
+    lo_h_flow->create_text( text = sy-uname ).
+* Set the top of list using the header for Online
+    co_alv->set_top_of_list( lo_header ).
+* Set the top of list using the header for Print
+    co_alv->set_top_of_list_print( lo_header ).
+  ENDMETHOD. "set_top_of_page
+* Setting End_Of_page
+
+*TOP OF PAGE BEGIN
+* Setting End_Of_page
+  METHOD set_end_of_page.
+    DATA: lo_footer  TYPE REF TO cl_salv_form_layout_grid,
+          lo_f_label TYPE REF TO cl_salv_form_label,
+          lo_f_flow  TYPE REF TO cl_salv_form_layout_flow.
+* Footer Object
+    CREATE OBJECT lo_footer.
+* Information in Bold
+    lo_f_label = lo_footer->create_label( row = 1 column = 1 ).
+    lo_f_label->set_text('Footer of the ALV in Bold').
+* Tabular Information
+    lo_f_flow = lo_footer->create_flow( row = 2 column = 1 ).
+    lo_f_flow->create_text( text = 'This is text of flow in footer' ).
+
+   lo_f_flow = lo_footer->create_flow( row = 3 column = 1 ).
+    lo_f_flow->create_text( text = sy-uzeit ).
+* Set the end of list using the header for Online
+    co_alv->set_end_of_list( lo_footer ).
+* Set the End of list using the header for Print
+    co_alv->set_end_of_list_print( lo_footer ).
+  ENDMETHOD. "set_end_of_page
+
+*TOP OF PAGE END
+
+*TOP OF PAGE END
+  METHOD change_columns.
+    "Get the reference  of cl_salv_columns_table class.
+    lr_columns  =  lr_salv->get_columns( ).
+    "Using the above refence call the below method to get the individual column reference.
+    "Here we are changing the CARRID column name
+    TRY.
+        lr_column =  lr_columns->get_column( columnname = 'LV_ICON'   ).
+      CATCH cx_salv_not_found .
+    ENDTRY.
+    "Call the below method to change the column anme
+    lr_column->set_long_text( value = 'Status true'   ).
+    lr_column->set_medium_text( value = 'Field status '   ).
+    lr_column->set_short_text( value = 'Status'   ).
+
+
+  ENDMETHOD.                    "change_columns
+
+
+ENDCLASS.
+
+START-OF-SELECTION.
+  DATA: lo_report TYPE REF TO lcl_report.
+*
+  CREATE OBJECT lo_report.
+*
+  CALL METHOD lo_report->get_data( ).
+*
+  CALL METHOD lo_report->generate_output( ).
+*
+  CALL METHOD lo_report->change_columns( ).
+
+*...activate alv generic functions
+  lr_salv->get_functions( )->set_all( ).
+*   Set the Column optimization
+  lr_salv->get_columns( )->set_optimize( ).
+
+  lr_salv->display( ).
